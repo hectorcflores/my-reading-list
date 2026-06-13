@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /reading_lists/{syncKeyHash}/urls/{urlId} {
+      allow read: if isSyncHash(syncKeyHash);
+      allow create: if isSyncHash(syncKeyHash) && isValidUrlDocument();
+      allow update, delete: if false;
+    }
+
+    function isSyncHash(syncKeyHash) {
+      return syncKeyHash.matches('^[a-f0-9]{64}$');
+    }
+
+    function isValidUrlDocument() {
+      return request.resource.data.keys().hasOnly(['url', 'createdAt'])
+        && request.resource.data.url is string
+        && request.resource.data.url.matches('^https?://.+')
+        && request.resource.data.createdAt is timestamp;
+    }
+  }
+}

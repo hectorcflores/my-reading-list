@@ -286,7 +286,20 @@
     </section>
   </main>
 
-  <script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import {
+      collection,
+      doc,
+      getDocs,
+      getFirestore,
+      limit,
+      orderBy,
+      query,
+      runTransaction,
+      Timestamp
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
     const syncConfigStorageKey = "my-reading-list.sync-config.v1";
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const queryParams = new URLSearchParams(window.location.search);
@@ -303,6 +316,7 @@
 
     let syncConfig = null;
     let urls = [];
+    let firestore = null;
 
     function loadSyncConfig() {
       if (typeof localStorage === "undefined") return null;
@@ -326,17 +340,21 @@
     }
 
     async function configureSyncFromUrl() {
-      const supabaseUrl = hashParams.get("sb_url") || queryParams.get("sb_url");
-      const supabaseAnonKey = hashParams.get("sb_key") || queryParams.get("sb_key");
+      const apiKey = hashParams.get("fb_api_key") || queryParams.get("fb_api_key");
+      const authDomain = hashParams.get("fb_auth_domain") || queryParams.get("fb_auth_domain");
+      const projectId = hashParams.get("fb_project_id") || queryParams.get("fb_project_id");
+      const appId = hashParams.get("fb_app_id") || queryParams.get("fb_app_id");
       const syncKey = hashParams.get("sync_key") || queryParams.get("sync_key");
 
-      if (!supabaseUrl || !supabaseAnonKey || !syncKey) {
+      if (!apiKey || !authDomain || !projectId || !appId || !syncKey) {
         return loadSyncConfig();
       }
 
       const config = {
-        supabaseUrl: supabaseUrl.replace(/\/$/, ""),
-        supabaseAnonKey,
+        apiKey,
+        authDomain,
+        projectId,
+        appId,
         syncKeyHash: await sha256(syncKey)
       };
 
@@ -354,7 +372,14 @@
     }
 
     function isSyncEnabled() {
-      return Boolean(syncConfig && syncConfig.supabaseUrl && syncConfig.supabaseAnonKey && syncConfig.syncKeyHash);
+      return Boolean(
+        syncConfig
+        && syncConfig.apiKey
+        && syncConfig.authDomain
+        && syncConfig.projectId
+        && syncConfig.appId
+        && syncConfig.syncKeyHash
+      );
     }
 
     function setSyncStatus(label, status = "local") {
@@ -371,24 +396,22 @@
       }
     }
 
-    async function supabaseRpc(functionName, body) {
+    function getDb() {
       if (!isSyncEnabled()) return null;
+      if (firestore) return firestore;
 
-      const response = await fetch(`${syncConfig.supabaseUrl}/rest/v1/rpc/${functionName}`, {
-        method: "POST",
-        headers: {
-          "apikey": syncConfig.supabaseAnonKey,
-          "Authorization": `Bearer ${syncConfig.supabaseAnonKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
+      const app = initializeApp({
+        apiKey: syncConfig.apiKey,
+        authDomain: syncConfig.authDomain,
+        projectId: syncConfig.projectId,
+        appId: syncConfig.appId
       });
+      firestore = getFirestore(app);
+      return firestore;
+    }
 
-      if (!response.ok) {
-        throw new Error(`${functionName} failed: ${response.status}`);
-      }
-
-      return response.json();
+    function urlsCollection() {
+      return collection(getDb(), "reading_lists", syncConfig.syncKeyHash, "urls");
     }
 
     function parseUrls(value) {
@@ -468,8 +491,16 @@
 
       try {
         setSyncStatus("Syncing", "saving");
-        urls = await supabaseRpc("list_reading_urls", {
-          p_sync_key_hash: syncConfig.syncKeyHash
+        const snapshot = await getDocs(query(urlsCollection(), orderBy("createdAt", "desc"), limit(500)));
+        urls = snapshot.docs.map((entry) => {
+          const data = entry.data();
+          return {
+            id: entry.id,
+            url: data.url,
+            created_at: data.createdAt && typeof data.createdAt.toDate === "function"
+              ? data.createdAt.toDate().toISOString()
+              : new Date().toISOString()
+          };
         });
         renderList();
         setSyncStatus("Synced", "synced");
@@ -500,10 +531,7 @@
       setMessage("Saving...", "");
 
       try {
-        await Promise.all(valid.map((url) => supabaseRpc("create_reading_url", {
-          p_sync_key_hash: syncConfig.syncKeyHash,
-          p_url: url
-        })));
+        await Promise.all(valid.map((url) => createRemoteUrl(url)));
         els.urlInput.value = invalid.join("\n");
         await loadRemoteUrls();
 
@@ -514,10 +542,23 @@
       } catch (error) {
         console.warn(error);
         setSyncStatus("Sync issue", "issue");
-        setMessage("Could not save. Check Supabase setup and try again.", "issue");
+        setMessage("Could not save. Check Firebase setup and try again.", "issue");
       } finally {
         els.saveButton.disabled = false;
       }
+    }
+
+    async function createRemoteUrl(url) {
+      const target = doc(getDb(), "reading_lists", syncConfig.syncKeyHash, "urls", await sha256(url));
+      await runTransaction(getDb(), async (transaction) => {
+        const existing = await transaction.get(target);
+        if (existing.exists()) return;
+
+        transaction.set(target, {
+          url,
+          createdAt: Timestamp.fromDate(new Date())
+        });
+      });
     }
 
     els.saveButton.addEventListener("click", saveUrls);
