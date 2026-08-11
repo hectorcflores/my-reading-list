@@ -67,12 +67,11 @@ export async function synthesizeEpisode(script, outputPath, workDir) {
   await mkdir(path.dirname(outputPath), { recursive: true });
 
   const chunks = chunkScript(script);
-  const chunkPaths = [];
-  for (let i = 0; i < chunks.length; i += 1) {
-    const chunkPath = path.join(chunkDir, `${String(i).padStart(3, "0")}.mp3`);
-    await synthesizeChunk(chunks[i], chunkPath);
-    chunkPaths.push(chunkPath);
-  }
+  // Synthesize chunks concurrently to keep save-to-listen latency low.
+  const chunkPaths = chunks.map((_, i) =>
+    path.join(chunkDir, `${String(i).padStart(3, "0")}.mp3`)
+  );
+  await Promise.all(chunks.map((chunk, i) => synthesizeChunk(chunk, chunkPaths[i])));
 
   const joinedPath = path.join(chunkDir, "joined.mp3");
   if (chunkPaths.length === 1) {

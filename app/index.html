@@ -410,6 +410,7 @@
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
     const syncConfigStorageKey = "my-reading-list.sync-config.v1";
+    const githubRepo = "hectorcflores/my-reading-list";
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const queryParams = new URLSearchParams(window.location.search);
 
@@ -426,8 +427,11 @@
 
     let syncConfig = null;
     let urls = [];
+    let episodes = {};
     let firestore = null;
     let playingId = null;
+    let episodePollTimer = null;
+    let episodePollTicks = 0;
 
     const playbackStorageKey = "my-reading-list.playback.v1";
 
@@ -458,9 +462,18 @@
       const projectId = hashParams.get("fb_project_id") || queryParams.get("fb_project_id");
       const appId = hashParams.get("fb_app_id") || queryParams.get("fb_app_id");
       const syncKey = hashParams.get("sync_key") || queryParams.get("sync_key");
+      const ghToken = hashParams.get("gh_token") || queryParams.get("gh_token");
+      const stored = loadSyncConfig();
 
       if (!apiKey || !authDomain || !projectId || !appId || !syncKey) {
-        return loadSyncConfig();
+        // Allow adding/refreshing just the GitHub token after initial setup.
+        if (ghToken && stored) {
+          const config = { ...stored, ghToken };
+          saveSyncConfig(config);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          return config;
+        }
+        return stored;
       }
 
       const config = {
@@ -468,7 +481,8 @@
         authDomain,
         projectId,
         appId,
-        syncKeyHash: await sha256(syncKey)
+        syncKeyHash: await sha256(syncKey),
+        ghToken: ghToken || stored?.ghToken || ""
       };
 
       saveSyncConfig(config);
@@ -585,36 +599,30 @@
       return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
     }
 
-    function renderEpisodeStatus(item) {
-      const episode = item.episode;
-      if (!episode) {
-        return `<span class="episode-status">Episode queued</span>`;
+    function renderEpisodeStatus(item, entry) {
+      if (entry?.status === "failed") {
+        return `<span class="episode-status" data-tone="issue">Episode failed: ${escapeHtml(entry.error || "unknown error")}</span>`;
       }
-      if (episode.status === "processing") {
-        return `<span class="episode-status">Generating&hellip;</span>`;
-      }
-      if (episode.status === "failed") {
-        return `<span class="episode-status" data-tone="issue">Episode failed: ${escapeHtml(episode.error || "unknown error")}</span>`;
-      }
-      if (episode.status === "ready" && episode.audioPath) {
+      if (entry?.status === "ready" && entry.audioPath) {
         const isPlaying = item.id === playingId && !els.player.paused;
         return `
           <button class="play-btn" type="button" data-id="${escapeHtml(item.id)}" data-playing="${isPlaying}">
             ${isPlaying ? "&#10074;&#10074; Pause" : "&#9654; Play"}
           </button>
-          <span class="episode-status">${escapeHtml(formatDuration(episode.durationSec))}</span>
+          <span class="episode-status">${escapeHtml(formatDuration(entry.durationSec))}</span>
         `;
       }
-      return `<span class="episode-status">Episode queued</span>`;
+      return `<span class="episode-status">Generating&hellip;</span>`;
     }
 
     function renderList() {
       els.count.textContent = `${urls.length} ${urls.length === 1 ? "link" : "links"}`;
       els.emptyState.hidden = urls.length > 0;
       els.urlList.innerHTML = urls.map((item) => {
+        const entry = episodes[item.id];
         const safeUrl = escapeHtml(item.url);
         const safeDate = escapeHtml(formatCreatedAt(item.created_at));
-        const title = item.episode?.title || fallbackTitle(item.url);
+        const title = entry?.title || fallbackTitle(item.url);
         return `
           <li class="url-item">
             <div class="item-title">${escapeHtml(title)}</div>
@@ -622,7 +630,7 @@
             <div class="item-meta">
               <time datetime="${escapeHtml(item.created_at)}">${safeDate}</time>
               <span class="format-tag">${item.format === "deep" ? "Deep dive" : "TLDR"}</span>
-              ${renderEpisodeStatus(item)}
+              ${renderEpisodeStatus(item, entry)}
             </div>
           </li>
         `;
@@ -636,6 +644,71 @@
         .replaceAll(">", "&gt;")
         .replaceAll("\"", "&quot;")
         .replaceAll("'", "&#039;");
+    }
+
+    async function loadEpisodes() {
+      try {
+        const response = await fetch(`./episodes.json?ts=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) return;
+        episodes = (await response.json()) || {};
+      } catch {
+        // Status file may not be deployed yet; items just show as generating.
+      }
+    }
+
+    function hasPendingEpisodes() {
+      return urls.some((item) => !episodes[item.id]);
+    }
+
+    function scheduleEpisodePolling() {
+      if (!hasPendingEpisodes()) {
+        if (episodePollTimer) {
+          clearInterval(episodePollTimer);
+          episodePollTimer = null;
+        }
+        return;
+      }
+      if (episodePollTimer) return;
+
+      episodePollTicks = 0;
+      episodePollTimer = setInterval(async () => {
+        episodePollTicks += 1;
+        await loadEpisodes();
+        renderList();
+        // Give up after ~20 minutes; the next visit or save resumes polling.
+        if (!hasPendingEpisodes() || episodePollTicks >= 60) {
+          clearInterval(episodePollTimer);
+          episodePollTimer = null;
+        }
+      }, 20000);
+    }
+
+    async function requestEpisodeGeneration() {
+      if (!syncConfig?.ghToken) return false;
+
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/${githubRepo}/actions/workflows/podcast.yml/dispatches`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${syncConfig.ghToken}`,
+              Accept: "application/vnd.github+json",
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ ref: "main" })
+          }
+        );
+        return response.status === 204;
+      } catch {
+        return false;
+      }
+    }
+
+    async function refresh() {
+      await Promise.all([loadEpisodes(), loadRemoteUrls()]);
+      renderList();
+      scheduleEpisodePolling();
     }
 
     async function loadRemoteUrls() {
@@ -657,8 +730,7 @@
             created_at: data.createdAt && typeof data.createdAt.toDate === "function"
               ? data.createdAt.toDate().toISOString()
               : new Date().toISOString(),
-            format: data.format === "deep" ? "deep" : "tldr",
-            episode: data.episode || null
+            format: data.format === "deep" ? "deep" : "tldr"
           };
         });
         renderList();
@@ -694,12 +766,14 @@
       try {
         await Promise.all(valid.map((url) => createRemoteUrl(url, format)));
         els.urlInput.value = invalid.join("\n");
-        await loadRemoteUrls();
+        await refresh();
+        const triggered = await requestEpisodeGeneration();
 
         const invalidMessage = invalid.length > 0
           ? ` ${invalid.length} invalid ${invalid.length === 1 ? "entry was" : "entries were"} left in the box.`
           : "";
-        setMessage(`Saved ${valid.length} ${valid.length === 1 ? "URL" : "URLs"}.${invalidMessage}`, invalid.length > 0 ? "issue" : "ok");
+        const episodeMessage = triggered ? " Generating episodes now." : "";
+        setMessage(`Saved ${valid.length} ${valid.length === 1 ? "URL" : "URLs"}.${episodeMessage}${invalidMessage}`, invalid.length > 0 ? "issue" : "ok");
       } catch (error) {
         console.warn(error);
         setSyncStatus("Sync issue", "issue");
@@ -755,11 +829,11 @@
         return;
       }
 
-      const item = urls.find((entry) => entry.id === id);
-      if (!item?.episode?.audioPath) return;
+      const entry = episodes[id];
+      if (!entry?.audioPath) return;
 
       playingId = id;
-      els.player.src = `./${item.episode.audioPath}`;
+      els.player.src = `./${entry.audioPath}`;
       els.player.play();
     }
 
@@ -804,17 +878,17 @@
     });
 
     window.addEventListener("focus", () => {
-      loadRemoteUrls();
+      refresh();
     });
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) loadRemoteUrls();
+      if (!document.hidden) refresh();
     });
 
     async function init() {
       syncConfig = await configureSyncFromUrl();
       setSyncStatus(isSyncEnabled() ? "Syncing" : "Setup needed", isSyncEnabled() ? "saving" : "local");
-      await loadRemoteUrls();
+      await refresh();
     }
 
     init();

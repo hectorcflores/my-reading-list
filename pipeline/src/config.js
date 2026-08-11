@@ -18,7 +18,6 @@ export const FETCH_TIMEOUT_MS = 20000;
 export const MAX_HTML_BYTES = 3 * 1024 * 1024;
 
 export const MAX_ATTEMPTS = 3;
-export const PROCESSING_LEASE_MS = 30 * 60 * 1000;
 export const EPISODES_PER_RUN = 5;
 
 export const FORMATS = {

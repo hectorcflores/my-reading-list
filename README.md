@@ -41,31 +41,37 @@ Use the same setup URL once on each computer.
 
 Publish this repository with GitHub Pages from the root of the `main` branch. The root `index.html` redirects to `app/index.html`.
 
-## Podcast Pipeline Setup
+## Podcast Setup
 
-A GitHub Actions workflow (`.github/workflows/podcast.yml`) runs every 30
-minutes (plus a manual **Run workflow** button under Actions). It finds saved
-links without episodes, extracts the article, writes a narration script with
-`gpt-4o-mini`, voices it with `gpt-4o-mini-tts`, commits the MP3 under
-`app/episodes/`, and writes the episode status back to Firestore so the app
-shows a title, duration, and play button.
+When a link is saved, the app triggers a GitHub Actions workflow
+(`.github/workflows/podcast.yml`) that extracts the article, writes a
+narration script with `gpt-4o-mini`, voices it with `gpt-4o-mini-tts`, and
+commits the MP3 plus a status file (`app/episodes.json`) that the app reads.
+An episode is typically playable **2-4 minutes after saving**. A half-hourly
+scheduled run sweeps up anything a trigger missed.
 
-One-time setup:
+One-time setup (all copy-paste, no Google Cloud console needed):
 
-1. In the Google Cloud console for your Firebase project, create a service
-   account with the **Cloud Datastore User** role and download a JSON key.
-2. In this repo's **Settings → Secrets and variables → Actions**, add:
-   - `OPENAI_API_KEY` — an OpenAI API key.
-   - `FIREBASE_SERVICE_ACCOUNT` — the full JSON key file contents.
-3. Re-publish the updated `firestore.rules` in the Firebase console (the
+1. Re-publish the updated `firestore.rules` in the Firebase console (the
    client now saves a `format` field).
+2. In this repo's **Settings → Secrets and variables → Actions**, add four
+   secrets (the last three are the same values used in the sync setup URL):
+   - `OPENAI_API_KEY` — an OpenAI API key.
+   - `FIREBASE_PROJECT_ID` — same value as `fb_project_id`.
+   - `FIREBASE_API_KEY` — same value as `fb_api_key`.
+   - `SYNC_KEY` — the private sync secret itself.
+3. For instant generation, create a fine-grained personal access token at
+   github.com → Settings → Developer settings → Fine-grained tokens: scope it
+   to **only this repository** with **Actions: Read and write** permission.
+   Then open the app once with `#gh_token=YOUR_TOKEN` appended to the URL —
+   it is stored in the browser like the sync config. Without a token,
+   episodes still generate on the half-hourly schedule.
 
 Pipeline lives in `pipeline/` (Node 20+). Run it locally with:
 
 ```bash
 cd pipeline && npm install
-OPENAI_API_KEY=... FIREBASE_SERVICE_ACCOUNT="$(cat sa.json)" npm run generate
-npm run finalize   # after committing/pushing the generated MP3s
+OPENAI_API_KEY=... FIREBASE_PROJECT_ID=... FIREBASE_API_KEY=... SYNC_KEY=... npm run generate
 ```
 
 Approximate cost: ~$0.04 per TLDR, ~$0.15 per deep dive (OpenAI usage only —
