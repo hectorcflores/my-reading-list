@@ -13,10 +13,11 @@ service cloud.firestore {
     }
 
     function isValidUrlDocument() {
-      return request.resource.data.keys().hasOnly(['url', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['url', 'createdAt', 'format'])
         && request.resource.data.url is string
         && request.resource.data.url.matches('^https?://.+')
-        && request.resource.data.createdAt is timestamp;
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.format in ['tldr', 'deep'];
     }
   }
 }

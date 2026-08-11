@@ -167,6 +167,41 @@
       background: #303030;
     }
 
+    .format-picker {
+      display: inline-flex;
+      width: max-content;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .format-option input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .format-option span {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 0 16px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .format-option input:checked + span {
+      background: #111111;
+      color: #ffffff;
+    }
+
+    .format-option input:focus-visible + span {
+      outline: 3px solid #cce4ff;
+      outline-offset: -3px;
+    }
+
     .message {
       min-height: 20px;
       margin: 0;
@@ -228,6 +263,68 @@
       font-weight: 800;
     }
 
+    .item-title {
+      font-weight: 800;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .item-url {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .item-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .format-tag {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 9px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .episode-status {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .episode-status[data-tone="issue"] {
+      color: var(--issue);
+    }
+
+    .play-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      padding: 0 14px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .play-btn:hover {
+      background: var(--soft);
+    }
+
+    .play-btn[data-playing="true"] {
+      background: #111111;
+      color: #ffffff;
+    }
+
     .empty {
       margin: 0;
       border: 1px dashed var(--line);
@@ -270,6 +367,16 @@
     <section class="composer" aria-label="Save URLs">
       <label for="urlInput">Paste URLs</label>
       <textarea id="urlInput" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <div class="format-picker" role="radiogroup" aria-label="Episode format">
+        <label class="format-option">
+          <input type="radio" name="episodeFormat" value="tldr" checked>
+          <span>TLDR</span>
+        </label>
+        <label class="format-option">
+          <input type="radio" name="episodeFormat" value="deep">
+          <span>Deep dive</span>
+        </label>
+      </div>
       <div class="actions">
         <p class="message" id="message" aria-live="polite"></p>
         <button class="primary" id="saveButton" type="button">Save</button>
@@ -284,6 +391,8 @@
       <ul class="url-list" id="urlList"></ul>
       <p class="empty" id="emptyState">No URLs saved yet.</p>
     </section>
+
+    <audio id="player" preload="none"></audio>
   </main>
 
   <script type="module">
@@ -311,12 +420,16 @@
       message: document.querySelector("#message"),
       urlList: document.querySelector("#urlList"),
       emptyState: document.querySelector("#emptyState"),
-      count: document.querySelector("#count")
+      count: document.querySelector("#count"),
+      player: document.querySelector("#player")
     };
 
     let syncConfig = null;
     let urls = [];
     let firestore = null;
+    let playingId = null;
+
+    const playbackStorageKey = "my-reading-list.playback.v1";
 
     function loadSyncConfig() {
       if (typeof localStorage === "undefined") return null;
@@ -457,16 +570,60 @@
       }).format(new Date(value));
     }
 
+    function fallbackTitle(url) {
+      try {
+        const parsed = new URL(url);
+        const trimmedPath = parsed.pathname.replace(/\/+$/, "");
+        return parsed.hostname + (trimmedPath.length > 1 ? trimmedPath : "");
+      } catch {
+        return url;
+      }
+    }
+
+    function formatDuration(totalSeconds) {
+      const seconds = Math.max(0, Math.round(totalSeconds || 0));
+      return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    }
+
+    function renderEpisodeStatus(item) {
+      const episode = item.episode;
+      if (!episode) {
+        return `<span class="episode-status">Episode queued</span>`;
+      }
+      if (episode.status === "processing") {
+        return `<span class="episode-status">Generating&hellip;</span>`;
+      }
+      if (episode.status === "failed") {
+        return `<span class="episode-status" data-tone="issue">Episode failed: ${escapeHtml(episode.error || "unknown error")}</span>`;
+      }
+      if (episode.status === "ready" && episode.audioPath) {
+        const isPlaying = item.id === playingId && !els.player.paused;
+        return `
+          <button class="play-btn" type="button" data-id="${escapeHtml(item.id)}" data-playing="${isPlaying}">
+            ${isPlaying ? "&#10074;&#10074; Pause" : "&#9654; Play"}
+          </button>
+          <span class="episode-status">${escapeHtml(formatDuration(episode.durationSec))}</span>
+        `;
+      }
+      return `<span class="episode-status">Episode queued</span>`;
+    }
+
     function renderList() {
       els.count.textContent = `${urls.length} ${urls.length === 1 ? "link" : "links"}`;
       els.emptyState.hidden = urls.length > 0;
       els.urlList.innerHTML = urls.map((item) => {
         const safeUrl = escapeHtml(item.url);
         const safeDate = escapeHtml(formatCreatedAt(item.created_at));
+        const title = item.episode?.title || fallbackTitle(item.url);
         return `
           <li class="url-item">
-            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>
-            <time datetime="${escapeHtml(item.created_at)}">${safeDate}</time>
+            <div class="item-title">${escapeHtml(title)}</div>
+            <a class="item-url" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>
+            <div class="item-meta">
+              <time datetime="${escapeHtml(item.created_at)}">${safeDate}</time>
+              <span class="format-tag">${item.format === "deep" ? "Deep dive" : "TLDR"}</span>
+              ${renderEpisodeStatus(item)}
+            </div>
           </li>
         `;
       }).join("");
@@ -499,7 +656,9 @@
             url: data.url,
             created_at: data.createdAt && typeof data.createdAt.toDate === "function"
               ? data.createdAt.toDate().toISOString()
-              : new Date().toISOString()
+              : new Date().toISOString(),
+            format: data.format === "deep" ? "deep" : "tldr",
+            episode: data.episode || null
           };
         });
         renderList();
@@ -530,8 +689,10 @@
       setSyncStatus("Saving", "saving");
       setMessage("Saving...", "");
 
+      const format = document.querySelector("input[name='episodeFormat']:checked")?.value || "tldr";
+
       try {
-        await Promise.all(valid.map((url) => createRemoteUrl(url)));
+        await Promise.all(valid.map((url) => createRemoteUrl(url, format)));
         els.urlInput.value = invalid.join("\n");
         await loadRemoteUrls();
 
@@ -548,7 +709,7 @@
       }
     }
 
-    async function createRemoteUrl(url) {
+    async function createRemoteUrl(url, format) {
       const target = doc(getDb(), "reading_lists", syncConfig.syncKeyHash, "urls", await sha256(url));
       await runTransaction(getDb(), async (transaction) => {
         const existing = await transaction.get(target);
@@ -556,10 +717,84 @@
 
         transaction.set(target, {
           url,
-          createdAt: Timestamp.fromDate(new Date())
+          createdAt: Timestamp.fromDate(new Date()),
+          format
         });
       });
     }
+
+    function loadPlaybackPositions() {
+      try {
+        return JSON.parse(localStorage.getItem(playbackStorageKey) || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    function savePlaybackPosition(id, seconds) {
+      const positions = loadPlaybackPositions();
+      if (seconds === null) {
+        delete positions[id];
+      } else {
+        positions[id] = seconds;
+      }
+      try {
+        localStorage.setItem(playbackStorageKey, JSON.stringify(positions));
+      } catch {
+        // Position memory is best-effort.
+      }
+    }
+
+    function togglePlayback(id) {
+      if (id === playingId) {
+        if (els.player.paused) {
+          els.player.play();
+        } else {
+          els.player.pause();
+        }
+        return;
+      }
+
+      const item = urls.find((entry) => entry.id === id);
+      if (!item?.episode?.audioPath) return;
+
+      playingId = id;
+      els.player.src = `./${item.episode.audioPath}`;
+      els.player.play();
+    }
+
+    els.urlList.addEventListener("click", (event) => {
+      const button = event.target.closest(".play-btn");
+      if (button) togglePlayback(button.dataset.id);
+    });
+
+    els.player.addEventListener("loadedmetadata", () => {
+      const saved = loadPlaybackPositions()[playingId];
+      if (saved > 0 && saved < els.player.duration - 5) {
+        els.player.currentTime = saved;
+      }
+    });
+
+    let lastPositionSave = 0;
+    els.player.addEventListener("timeupdate", () => {
+      if (!playingId || els.player.paused) return;
+      const now = Date.now();
+      if (now - lastPositionSave < 5000) return;
+      lastPositionSave = now;
+      savePlaybackPosition(playingId, Math.floor(els.player.currentTime));
+    });
+
+    els.player.addEventListener("ended", () => {
+      savePlaybackPosition(playingId, null);
+      playingId = null;
+      renderList();
+    });
+
+    els.player.addEventListener("play", renderList);
+    els.player.addEventListener("pause", () => {
+      if (playingId) savePlaybackPosition(playingId, Math.floor(els.player.currentTime));
+      renderList();
+    });
 
     els.saveButton.addEventListener("click", saveUrls);
     els.urlInput.addEventListener("keydown", (event) => {
