@@ -39,9 +39,20 @@ Use the same setup URL once on each computer.
 
 Publish this repository with GitHub Pages from the root of the `main` branch. The root `index.html` redirects to `app/index.html`.
 
+## Auto-Generated Descriptions
+
+A GitHub Actions workflow (`.github/workflows/generate-descriptions.yml`) fills in a one-line description for any saved link that doesn't have one yet, using Gemini. It runs every 30 minutes and covers both new links and any already in the database.
+
+Requires two repo secrets (Settings → Secrets and variables → Actions):
+
+- `GEMINI_API_KEY` — free key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- `FIREBASE_SERVICE_ACCOUNT` — the full JSON key from Firebase Console → Project Settings → Service Accounts → Generate new private key
+
+This uses the Firebase Admin SDK, which bypasses Firestore security rules, so no rules change is needed for the workflow to write descriptions.
+
 ## Notes
 
 - GitHub Pages only hosts the static website. Firebase Firestore is the database.
 - Firebase web app config is designed to be public in browser apps.
 - The private sync secret is what separates your reading list from anyone else's.
-- The app intentionally stores only the URL and creation time.
+- The app stores the URL, an optional description, and creation time.
