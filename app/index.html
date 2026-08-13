@@ -3,22 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#09090b">
   <title>My Reading List</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #ffffff;
-      --ink: #111111;
-      --muted: #5f6368;
-      --line: #d7d7d7;
-      --line-strong: #111111;
-      --surface: #ffffff;
-      --soft: #f6f6f6;
-      --issue: #b00020;
-      --ok: #0b7a3b;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #09090b;
+      --ink: #fafafa;
+      --ink-2: #e4e4e7;
+      --muted: #a1a1aa;
+      --line: #27272a;
+      --chip: #27272a;
+      --hover: rgba(250, 250, 250, 0.08);
+      --surface: #09090b;
+      --issue: #f87171;
+      --ok: #4ade80;
+      font-family: Geist, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     * {
@@ -26,6 +29,8 @@
     }
 
     body {
+      display: grid;
+      place-items: center;
       min-height: 100vh;
       margin: 0;
       background: var(--bg);
@@ -38,16 +43,17 @@
     }
 
     button {
-      min-height: 46px;
+      min-height: 44px;
       border: 0;
-      border-radius: 8px;
-      font-weight: 800;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
       cursor: pointer;
     }
 
     button:disabled {
       cursor: not-allowed;
-      opacity: 0.45;
+      opacity: 0.42;
     }
 
     a {
@@ -60,9 +66,12 @@
     .shell {
       display: grid;
       gap: 22px;
-      width: min(780px, calc(100vw - 28px));
-      margin: 0 auto;
-      padding: 34px 0;
+      width: min(760px, calc(100vw - 28px));
+      padding: 34px 26px 28px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     }
 
     .topbar {
@@ -74,27 +83,32 @@
 
     h1 {
       margin: 0;
-      font-size: clamp(28px, 6vw, 44px);
+      color: var(--ink);
+      font-size: clamp(24px, 5vw, 34px);
+      font-weight: 600;
       line-height: 1;
-      letter-spacing: 0;
+      letter-spacing: -0.02em;
     }
 
     .sync-status {
       display: inline-flex;
       align-items: center;
       flex: 0 0 auto;
-      gap: 7px;
+      gap: 6px;
       min-height: 18px;
       color: var(--muted);
-      font-size: 13px;
-      font-weight: 800;
+      font-size: 12px;
+      font-weight: 500;
       line-height: 1.3;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 10px;
     }
 
     .sync-status::before {
       content: "";
-      width: 13px;
-      height: 13px;
+      width: 6px;
+      height: 6px;
       border-radius: 999px;
       background: var(--issue);
     }
@@ -128,25 +142,26 @@
 
     label {
       color: var(--muted);
-      font-size: 14px;
-      font-weight: 800;
+      font-size: 13px;
+      font-weight: 500;
     }
 
     textarea {
       width: 100%;
       min-height: 138px;
       resize: vertical;
-      border: 1px solid var(--line-strong);
-      border-radius: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       padding: 14px;
       color: var(--ink);
-      background: var(--surface);
+      background: var(--chip);
       line-height: 1.45;
     }
 
     textarea:focus {
-      outline: 3px solid #cce4ff;
-      outline-offset: 2px;
+      outline: none;
+      border-color: var(--ink-2);
+      box-shadow: 0 0 0 3px rgba(250, 250, 250, 0.15);
     }
 
     .actions {
@@ -159,20 +174,21 @@
     .primary {
       min-width: 132px;
       padding: 0 18px;
-      background: #111111;
-      color: #ffffff;
+      background: var(--ink);
+      color: #18181b;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     }
 
     .primary:hover {
-      background: #303030;
+      background: var(--ink-2);
     }
 
     .message {
       min-height: 20px;
       margin: 0;
       color: var(--muted);
-      font-size: 14px;
-      font-weight: 700;
+      font-size: 13px;
+      font-weight: 500;
       line-height: 1.35;
     }
 
@@ -195,14 +211,16 @@
 
     h2 {
       margin: 0;
-      font-size: 18px;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 600;
       letter-spacing: 0;
     }
 
     .count {
       color: var(--muted);
-      font-size: 13px;
-      font-weight: 800;
+      font-size: 12px;
+      font-weight: 500;
     }
 
     .url-list {
@@ -217,31 +235,43 @@
       display: grid;
       gap: 7px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 6px;
       padding: 13px 14px;
-      background: var(--surface);
+      background: var(--chip);
+    }
+
+    .url-item a:hover {
+      color: var(--ink-2);
+    }
+
+    .url-item .desc {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
     }
 
     .url-item time {
       color: var(--muted);
       font-size: 12px;
-      font-weight: 800;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
     }
 
     .empty {
       margin: 0;
       border: 1px dashed var(--line);
-      border-radius: 8px;
+      border-radius: 6px;
       padding: 18px 14px;
       color: var(--muted);
-      background: var(--soft);
-      font-weight: 700;
+      background: transparent;
+      font-size: 14px;
+      font-weight: 500;
       line-height: 1.4;
     }
 
     @media (max-width: 540px) {
       .shell {
-        padding: 22px 0;
+        padding: 22px 18px 24px;
       }
 
       .topbar,
@@ -268,7 +298,7 @@
     </header>
 
     <section class="composer" aria-label="Save URLs">
-      <label for="urlInput">Paste URLs</label>
+      <label for="urlInput">Paste URLs (one per line, optionally followed by a short description)</label>
       <textarea id="urlInput" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
       <div class="actions">
         <p class="message" id="message" aria-live="polite"></p>
@@ -415,25 +445,26 @@
     }
 
     function parseUrls(value) {
-      const tokens = value
-        .split(/\s+/)
-        .map((token) => token.trim())
+      const lines = value
+        .split(/\n+/)
+        .map((line) => line.trim())
         .filter(Boolean);
 
       const valid = [];
       const invalid = [];
       const seen = new Set();
 
-      tokens.forEach((token) => {
+      lines.forEach((line) => {
+        const [token, ...rest] = line.split(/\s+/);
         const normalized = normalizeUrl(token);
         if (!normalized) {
-          invalid.push(token);
+          invalid.push(line);
           return;
         }
 
         if (!seen.has(normalized)) {
           seen.add(normalized);
-          valid.push(normalized);
+          valid.push({ url: normalized, description: rest.join(" ") });
         }
       });
 
@@ -463,9 +494,12 @@
       els.urlList.innerHTML = urls.map((item) => {
         const safeUrl = escapeHtml(item.url);
         const safeDate = escapeHtml(formatCreatedAt(item.created_at));
+        const description = item.description
+          ? `<span class="desc">${escapeHtml(item.description)}</span>`
+          : "";
         return `
           <li class="url-item">
-            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>
+            <div><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>${description ? " — " + description : ""}</div>
             <time datetime="${escapeHtml(item.created_at)}">${safeDate}</time>
           </li>
         `;
@@ -497,6 +531,7 @@
           return {
             id: entry.id,
             url: data.url,
+            description: data.description || "",
             created_at: data.createdAt && typeof data.createdAt.toDate === "function"
               ? data.createdAt.toDate().toISOString()
               : new Date().toISOString()
@@ -531,7 +566,7 @@
       setMessage("Saving...", "");
 
       try {
-        await Promise.all(valid.map((url) => createRemoteUrl(url)));
+        await Promise.all(valid.map((item) => createRemoteUrl(item.url, item.description)));
         els.urlInput.value = invalid.join("\n");
         await loadRemoteUrls();
 
@@ -548,7 +583,7 @@
       }
     }
 
-    async function createRemoteUrl(url) {
+    async function createRemoteUrl(url, description) {
       const target = doc(getDb(), "reading_lists", syncConfig.syncKeyHash, "urls", await sha256(url));
       await runTransaction(getDb(), async (transaction) => {
         const existing = await transaction.get(target);
@@ -556,6 +591,7 @@
 
         transaction.set(target, {
           url,
+          description: description || "",
           createdAt: Timestamp.fromDate(new Date())
         });
       });
