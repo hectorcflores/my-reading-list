@@ -269,6 +269,71 @@
       line-height: 1.4;
     }
 
+    .auth-view {
+      display: grid;
+      justify-items: center;
+      gap: 14px;
+      padding: 38px 0 26px;
+      text-align: center;
+    }
+
+    .auth-view p {
+      max-width: 40ch;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .google-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 20px;
+      background: var(--ink);
+      color: #18181b;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    .google-button:hover {
+      background: var(--ink-2);
+    }
+
+    .google-button svg {
+      flex: 0 0 auto;
+    }
+
+    .account-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .account-row button {
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .account-row button:hover {
+      color: var(--ink-2);
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
     @media (max-width: 540px) {
       .shell {
         padding: 22px 18px 24px;
@@ -294,10 +359,23 @@
   <main class="shell" aria-label="My Reading List">
     <header class="topbar">
       <h1>My Reading List</h1>
-      <div class="sync-status" id="syncStatus" data-status="local">Setup needed</div>
+      <div class="sync-status" id="syncStatus" data-status="local">Loading</div>
     </header>
 
-    <section class="composer" aria-label="Save URLs">
+    <section class="auth-view" id="authView">
+      <p id="authMessage">One list, on every device.</p>
+      <button class="google-button" id="signInButton" type="button" hidden>
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Sign in with Google
+      </button>
+    </section>
+
+    <section class="composer" id="composerView" aria-label="Save URLs" hidden>
       <label for="urlInput">Paste URLs (one per line, optionally followed by a short description)</label>
       <textarea id="urlInput" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
       <div class="actions">
@@ -306,7 +384,7 @@
       </div>
     </section>
 
-    <section aria-label="Saved URLs">
+    <section id="listView" aria-label="Saved URLs" hidden>
       <div class="list-header">
         <h2>Saved URLs</h2>
         <div class="count" id="count">0 links</div>
@@ -314,219 +392,349 @@
       <ul class="url-list" id="urlList"></ul>
       <p class="empty" id="emptyState">No URLs saved yet.</p>
     </section>
+
+    <p class="account-row" id="accountRow" hidden>
+      <span id="accountEmail"></span>
+      <span>·</span>
+      <button id="signOutButton" type="button">Sign out</button>
+    </p>
   </main>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-    import {
-      collection,
-      doc,
-      getDocs,
-      getFirestore,
-      limit,
-      orderBy,
-      query,
-      runTransaction,
-      Timestamp
-    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+  <script>
+    // Core app: everything except Firebase itself. The module script at the
+    // bottom builds real services from the Firebase SDK and calls App.start;
+    // tests can call App.start with fakes instead.
+    (function () {
+      const legacyConfigStorageKey = "my-reading-list.sync-config.v1";
+      const migratedStorageKey = "my-reading-list.migrated.v1";
 
-    const syncConfigStorageKey = "my-reading-list.sync-config.v1";
-    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    const queryParams = new URLSearchParams(window.location.search);
-
-    const els = {
-      syncStatus: document.querySelector("#syncStatus"),
-      urlInput: document.querySelector("#urlInput"),
-      saveButton: document.querySelector("#saveButton"),
-      message: document.querySelector("#message"),
-      urlList: document.querySelector("#urlList"),
-      emptyState: document.querySelector("#emptyState"),
-      count: document.querySelector("#count")
-    };
-
-    let syncConfig = null;
-    let urls = [];
-    let firestore = null;
-
-    function loadSyncConfig() {
-      if (typeof localStorage === "undefined") return null;
-
-      try {
-        return JSON.parse(localStorage.getItem(syncConfigStorageKey) || "null");
-      } catch {
-        return null;
-      }
-    }
-
-    function saveSyncConfig(config) {
-      if (typeof localStorage === "undefined") return false;
-
-      try {
-        localStorage.setItem(syncConfigStorageKey, JSON.stringify(config));
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    async function configureSyncFromUrl() {
-      const apiKey = hashParams.get("fb_api_key") || queryParams.get("fb_api_key");
-      const authDomain = hashParams.get("fb_auth_domain") || queryParams.get("fb_auth_domain");
-      const projectId = hashParams.get("fb_project_id") || queryParams.get("fb_project_id");
-      const appId = hashParams.get("fb_app_id") || queryParams.get("fb_app_id");
-      const syncKey = hashParams.get("sync_key") || queryParams.get("sync_key");
-
-      if (!apiKey || !authDomain || !projectId || !appId || !syncKey) {
-        return loadSyncConfig();
-      }
-
-      const config = {
-        apiKey,
-        authDomain,
-        projectId,
-        appId,
-        syncKeyHash: await sha256(syncKey)
+      const els = {
+        syncStatus: document.querySelector("#syncStatus"),
+        authView: document.querySelector("#authView"),
+        authMessage: document.querySelector("#authMessage"),
+        signInButton: document.querySelector("#signInButton"),
+        composerView: document.querySelector("#composerView"),
+        listView: document.querySelector("#listView"),
+        urlInput: document.querySelector("#urlInput"),
+        saveButton: document.querySelector("#saveButton"),
+        message: document.querySelector("#message"),
+        urlList: document.querySelector("#urlList"),
+        emptyState: document.querySelector("#emptyState"),
+        count: document.querySelector("#count"),
+        accountRow: document.querySelector("#accountRow"),
+        accountEmail: document.querySelector("#accountEmail"),
+        signOutButton: document.querySelector("#signOutButton")
       };
 
-      saveSyncConfig(config);
-      window.history.replaceState({}, document.title, window.location.pathname);
-      return config;
-    }
+      let services = null;
+      let user = null;
+      let urls = [];
 
-    async function sha256(value) {
-      const bytes = new TextEncoder().encode(value);
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
-      return Array.from(new Uint8Array(digest))
-        .map((byte) => byte.toString(16).padStart(2, "0"))
-        .join("");
-    }
-
-    function isSyncEnabled() {
-      return Boolean(
-        syncConfig
-        && syncConfig.apiKey
-        && syncConfig.authDomain
-        && syncConfig.projectId
-        && syncConfig.appId
-        && syncConfig.syncKeyHash
-      );
-    }
-
-    function setSyncStatus(label, status = "local") {
-      els.syncStatus.textContent = label;
-      els.syncStatus.dataset.status = status;
-    }
-
-    function setMessage(text, tone = "") {
-      els.message.textContent = text;
-      if (tone) {
-        els.message.dataset.tone = tone;
-      } else {
-        delete els.message.dataset.tone;
+      function storageGet(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch {
+          return null;
+        }
       }
-    }
 
-    function getDb() {
-      if (!isSyncEnabled()) return null;
-      if (firestore) return firestore;
+      function storageSet(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch {
+          /* storage unavailable — migration will retry next load */
+        }
+      }
 
-      const app = initializeApp({
-        apiKey: syncConfig.apiKey,
-        authDomain: syncConfig.authDomain,
-        projectId: syncConfig.projectId,
-        appId: syncConfig.appId
-      });
-      firestore = getFirestore(app);
-      return firestore;
-    }
+      async function sha256(value) {
+        const bytes = new TextEncoder().encode(value);
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return Array.from(new Uint8Array(digest))
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+      }
 
-    function urlsCollection() {
-      return collection(getDb(), "reading_lists", syncConfig.syncKeyHash, "urls");
-    }
+      function setSyncStatus(label, status = "local") {
+        els.syncStatus.textContent = label;
+        els.syncStatus.dataset.status = status;
+      }
 
-    function parseUrls(value) {
-      const lines = value
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean);
+      function setMessage(text, tone = "") {
+        els.message.textContent = text;
+        if (tone) {
+          els.message.dataset.tone = tone;
+        } else {
+          delete els.message.dataset.tone;
+        }
+      }
 
-      const valid = [];
-      const invalid = [];
-      const seen = new Set();
+      function showSignedOut(message) {
+        els.authView.hidden = false;
+        els.authMessage.textContent = message || "One list, on every device.";
+        els.signInButton.hidden = false;
+        els.composerView.hidden = true;
+        els.listView.hidden = true;
+        els.accountRow.hidden = true;
+        setSyncStatus("Signed out", "local");
+      }
 
-      lines.forEach((line) => {
-        const [token, ...rest] = line.split(/\s+/);
-        const normalized = normalizeUrl(token);
-        if (!normalized) {
-          invalid.push(line);
+      function showUnavailable(message) {
+        els.authView.hidden = false;
+        els.authMessage.textContent = message;
+        els.signInButton.hidden = true;
+        els.composerView.hidden = true;
+        els.listView.hidden = true;
+        els.accountRow.hidden = true;
+        setSyncStatus("Offline", "issue");
+      }
+
+      function showSignedIn() {
+        els.authView.hidden = true;
+        els.composerView.hidden = false;
+        els.listView.hidden = false;
+        els.accountRow.hidden = false;
+        els.accountEmail.textContent = user.email
+          ? `Signed in as ${user.email}`
+          : "Signed in";
+      }
+
+      function parseUrls(value) {
+        const lines = value
+          .split(/\n+/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+
+        const valid = [];
+        const invalid = [];
+        const seen = new Set();
+
+        lines.forEach((line) => {
+          const [token, ...rest] = line.split(/\s+/);
+          const normalized = normalizeUrl(token);
+          if (!normalized) {
+            invalid.push(line);
+            return;
+          }
+
+          if (!seen.has(normalized)) {
+            seen.add(normalized);
+            valid.push({ url: normalized, description: rest.join(" ") });
+          }
+        });
+
+        return { valid, invalid };
+      }
+
+      function normalizeUrl(value) {
+        try {
+          const url = new URL(value);
+          if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+          return url.href;
+        } catch {
+          return null;
+        }
+      }
+
+      function formatCreatedAt(value) {
+        return new Intl.DateTimeFormat(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short"
+        }).format(new Date(value));
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll("\"", "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function renderList() {
+        els.count.textContent = `${urls.length} ${urls.length === 1 ? "link" : "links"}`;
+        els.emptyState.hidden = urls.length > 0;
+        els.urlList.innerHTML = urls.map((item) => {
+          const safeUrl = escapeHtml(item.url);
+          const safeDate = escapeHtml(formatCreatedAt(item.created_at));
+          const description = item.description
+            ? `<span class="desc">${escapeHtml(item.description)}</span>`
+            : "";
+          return `
+            <li class="url-item">
+              <div><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>${description ? " — " + description : ""}</div>
+              <time datetime="${escapeHtml(item.created_at)}">${safeDate}</time>
+            </li>
+          `;
+        }).join("");
+      }
+
+      async function loadRemoteUrls() {
+        if (!user) return false;
+
+        try {
+          setSyncStatus("Syncing", "saving");
+          urls = await services.listUrls(user.uid);
+          renderList();
+          setSyncStatus("Synced", "synced");
+          return true;
+        } catch (error) {
+          console.warn(error);
+          setSyncStatus("Sync issue", "issue");
+          return false;
+        }
+      }
+
+      async function saveUrls() {
+        if (!user) return;
+
+        const { valid, invalid } = parseUrls(els.urlInput.value);
+
+        if (valid.length === 0) {
+          setMessage(invalid.length > 0 ? "Paste a valid http:// or https:// URL." : "Paste at least one URL.", "issue");
           return;
         }
 
-        if (!seen.has(normalized)) {
-          seen.add(normalized);
-          valid.push({ url: normalized, description: rest.join(" ") });
+        els.saveButton.disabled = true;
+        setSyncStatus("Saving", "saving");
+        setMessage("Saving...", "");
+
+        try {
+          await Promise.all(valid.map(async (item) => services.createUrl(user.uid, {
+            id: await sha256(item.url),
+            url: item.url,
+            description: item.description,
+            createdAt: new Date()
+          })));
+          els.urlInput.value = invalid.join("\n");
+          await loadRemoteUrls();
+
+          const invalidMessage = invalid.length > 0
+            ? ` ${invalid.length} invalid ${invalid.length === 1 ? "entry was" : "entries were"} left in the box.`
+            : "";
+          setMessage(`Saved ${valid.length} ${valid.length === 1 ? "URL" : "URLs"}.${invalidMessage}`, invalid.length > 0 ? "issue" : "ok");
+        } catch (error) {
+          console.warn(error);
+          setSyncStatus("Sync issue", "issue");
+          setMessage("Could not save. Try again.", "issue");
+        } finally {
+          els.saveButton.disabled = false;
+        }
+      }
+
+      // One-time copy of bookmark-era data (reading_lists/{sha256 of old sync
+      // key}) into the signed-in account. Idempotent: doc ids are preserved
+      // and createUrl is create-only, so re-running never duplicates.
+      async function migrateLegacyIfNeeded() {
+        if (!user || storageGet(migratedStorageKey) === "done") return;
+
+        let legacy = null;
+        try {
+          legacy = JSON.parse(storageGet(legacyConfigStorageKey) || "null");
+        } catch {
+          legacy = null;
+        }
+
+        if (!legacy || !legacy.syncKeyHash) {
+          storageSet(migratedStorageKey, "done");
+          return;
+        }
+
+        try {
+          const rows = await services.listLegacyUrls(legacy.syncKeyHash);
+          for (const row of rows) {
+            await services.createUrl(user.uid, {
+              id: row.id,
+              url: row.url,
+              description: row.description || "",
+              createdAt: new Date(row.created_at)
+            });
+          }
+          storageSet(migratedStorageKey, "done");
+          if (rows.length > 0) await loadRemoteUrls();
+        } catch (error) {
+          // Leave the flag unset so the next load retries.
+          console.warn("Legacy migration failed:", error);
+        }
+      }
+
+      async function onAuthChange(nextUser) {
+        user = nextUser;
+        if (!user) {
+          urls = [];
+          showSignedOut();
+          return;
+        }
+
+        showSignedIn();
+        await loadRemoteUrls();
+        await migrateLegacyIfNeeded();
+      }
+
+      els.saveButton.addEventListener("click", saveUrls);
+      els.urlInput.addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+          saveUrls();
         }
       });
+      els.signInButton.addEventListener("click", async () => {
+        try {
+          await services.signIn();
+        } catch (error) {
+          console.warn(error);
+          showSignedOut("Sign-in didn't complete. Try again.");
+        }
+      });
+      els.signOutButton.addEventListener("click", () => services.signOutUser());
 
-      return { valid, invalid };
-    }
+      window.addEventListener("focus", () => {
+        loadRemoteUrls();
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) loadRemoteUrls();
+      });
 
-    function normalizeUrl(value) {
+      window.App = {
+        start(nextServices) {
+          services = nextServices;
+          setSyncStatus("Loading", "local");
+          services.onAuthChange(onAuthChange);
+        },
+        unavailable(error) {
+          console.warn(error);
+          showUnavailable("Couldn't reach Google sign-in. Check your connection and reload.");
+        },
+        _test: { parseUrls, normalizeUrl, escapeHtml, sha256 }
+      };
+    })();
+  </script>
+
+  <script type="module">
+    // Firebase web config is public by design; identity and access control
+    // come from Google sign-in + Firestore rules, not from these values.
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyA5_DhdTdqjCVDeOgklUFcnJ1lwfESiP8Y",
+      authDomain: "my-reading-list-3fa75.firebaseapp.com",
+      projectId: "my-reading-list-3fa75",
+      appId: "1:101190488885:web:f0401ddd67b862f163b27c"
+    };
+
+    (async () => {
       try {
-        const url = new URL(value);
-        if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-        return url.href;
-      } catch {
-        return null;
-      }
-    }
+        const [{ initializeApp }, authMod, fs] = await Promise.all([
+          import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
+          import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
+          import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js")
+        ]);
 
-    function formatCreatedAt(value) {
-      return new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short"
-      }).format(new Date(value));
-    }
+        const app = initializeApp(FIREBASE_CONFIG);
+        const auth = authMod.getAuth(app);
+        const db = fs.getFirestore(app);
+        const provider = new authMod.GoogleAuthProvider();
 
-    function renderList() {
-      els.count.textContent = `${urls.length} ${urls.length === 1 ? "link" : "links"}`;
-      els.emptyState.hidden = urls.length > 0;
-      els.urlList.innerHTML = urls.map((item) => {
-        const safeUrl = escapeHtml(item.url);
-        const safeDate = escapeHtml(formatCreatedAt(item.created_at));
-        const description = item.description
-          ? `<span class="desc">${escapeHtml(item.description)}</span>`
-          : "";
-        return `
-          <li class="url-item">
-            <div><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>${description ? " — " + description : ""}</div>
-            <time datetime="${escapeHtml(item.created_at)}">${safeDate}</time>
-          </li>
-        `;
-      }).join("");
-    }
+        authMod.getRedirectResult(auth).catch((error) => console.warn(error));
 
-    function escapeHtml(value) {
-      return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll("\"", "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    async function loadRemoteUrls() {
-      if (!isSyncEnabled()) {
-        setSyncStatus("Setup needed", "local");
-        urls = [];
-        renderList();
-        return false;
-      }
-
-      try {
-        setSyncStatus("Syncing", "saving");
-        const snapshot = await getDocs(query(urlsCollection(), orderBy("createdAt", "desc"), limit(500)));
-        urls = snapshot.docs.map((entry) => {
+        function rowFromDoc(entry) {
           const data = entry.data();
           return {
             id: entry.id,
@@ -536,89 +744,61 @@
               ? data.createdAt.toDate().toISOString()
               : new Date().toISOString()
           };
+        }
+
+        async function listTenantUrls(tenantId) {
+          const snapshot = await fs.getDocs(fs.query(
+            fs.collection(db, "reading_lists", tenantId, "urls"),
+            fs.orderBy("createdAt", "desc"),
+            fs.limit(500)
+          ));
+          return snapshot.docs.map(rowFromDoc);
+        }
+
+        window.App.start({
+          onAuthChange(callback) {
+            authMod.onAuthStateChanged(auth, (firebaseUser) => {
+              callback(firebaseUser ? { uid: firebaseUser.uid, email: firebaseUser.email } : null);
+            });
+          },
+          async signIn() {
+            try {
+              await authMod.signInWithPopup(auth, provider);
+            } catch (error) {
+              const popupIssues = [
+                "auth/popup-blocked",
+                "auth/popup-closed-by-user",
+                "auth/cancelled-popup-request",
+                "auth/operation-not-supported-in-this-environment"
+              ];
+              if (popupIssues.includes(error.code)) {
+                await authMod.signInWithRedirect(auth, provider);
+              } else {
+                throw error;
+              }
+            }
+          },
+          signOutUser: () => authMod.signOut(auth),
+          listUrls: (uid) => listTenantUrls(uid),
+          listLegacyUrls: (hash) => listTenantUrls(hash),
+          async createUrl(uid, { id, url, description, createdAt }) {
+            const target = fs.doc(db, "reading_lists", uid, "urls", id);
+            await fs.runTransaction(db, async (transaction) => {
+              const existing = await transaction.get(target);
+              if (existing.exists()) return;
+
+              transaction.set(target, {
+                url,
+                description: description || "",
+                createdAt: fs.Timestamp.fromDate(createdAt)
+              });
+            });
+          }
         });
-        renderList();
-        setSyncStatus("Synced", "synced");
-        return true;
       } catch (error) {
-        console.warn(error);
-        setSyncStatus("Sync issue", "issue");
-        return false;
+        window.App.unavailable(error);
       }
-    }
-
-    async function saveUrls() {
-      const { valid, invalid } = parseUrls(els.urlInput.value);
-
-      if (valid.length === 0) {
-        setMessage(invalid.length > 0 ? "Paste a valid http:// or https:// URL." : "Paste at least one URL.", "issue");
-        return;
-      }
-
-      if (!isSyncEnabled()) {
-        setSyncStatus("Setup needed", "local");
-        setMessage("Sync setup is needed before URLs can be saved.", "issue");
-        return;
-      }
-
-      els.saveButton.disabled = true;
-      setSyncStatus("Saving", "saving");
-      setMessage("Saving...", "");
-
-      try {
-        await Promise.all(valid.map((item) => createRemoteUrl(item.url, item.description)));
-        els.urlInput.value = invalid.join("\n");
-        await loadRemoteUrls();
-
-        const invalidMessage = invalid.length > 0
-          ? ` ${invalid.length} invalid ${invalid.length === 1 ? "entry was" : "entries were"} left in the box.`
-          : "";
-        setMessage(`Saved ${valid.length} ${valid.length === 1 ? "URL" : "URLs"}.${invalidMessage}`, invalid.length > 0 ? "issue" : "ok");
-      } catch (error) {
-        console.warn(error);
-        setSyncStatus("Sync issue", "issue");
-        setMessage("Could not save. Check Firebase setup and try again.", "issue");
-      } finally {
-        els.saveButton.disabled = false;
-      }
-    }
-
-    async function createRemoteUrl(url, description) {
-      const target = doc(getDb(), "reading_lists", syncConfig.syncKeyHash, "urls", await sha256(url));
-      await runTransaction(getDb(), async (transaction) => {
-        const existing = await transaction.get(target);
-        if (existing.exists()) return;
-
-        transaction.set(target, {
-          url,
-          description: description || "",
-          createdAt: Timestamp.fromDate(new Date())
-        });
-      });
-    }
-
-    els.saveButton.addEventListener("click", saveUrls);
-    els.urlInput.addEventListener("keydown", (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-        saveUrls();
-      }
-    });
-
-    window.addEventListener("focus", () => {
-      loadRemoteUrls();
-    });
-
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) loadRemoteUrls();
-    });
-
-    async function init() {
-      syncConfig = await configureSyncFromUrl();
-      setSyncStatus(isSyncEnabled() ? "Syncing" : "Setup needed", isSyncEnabled() ? "saving" : "local");
-      await loadRemoteUrls();
-    }
-
-    init();
+    })();
   </script>
 </body>
 </html>
