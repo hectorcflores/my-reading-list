@@ -1,7 +1,7 @@
 import { cert, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_DESCRIPTION_CHARS = 140;
 
@@ -49,7 +49,7 @@ async function fetchPageMeta(url) {
 }
 
 async function generateDescription(url, meta) {
-  const apiKey = requireEnv("GEMINI_API_KEY");
+  const apiKey = requireEnv("OPENAI_API_KEY");
   const context = meta
     ? `Page title: ${meta.title || "(none)"}\nMeta description: ${meta.metaDescription || "(none)"}`
     : "(the page could not be fetched, infer from the URL only)";
@@ -60,30 +60,39 @@ ${context}
 
 Write a single-line description (max 100 characters) of what this page/article is about. No quotes, no trailing period, no preamble like "This page is about" — just the description itself.`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 60, temperature: 0.2 }
-      })
-    }
-  );
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      max_completion_tokens: 60
+    })
+  });
 
   if (!response.ok) {
-    throw new Error(`Gemini API error ${response.status}: ${await response.text()}`);
+    throw new Error(`OpenAI API error ${response.status}: ${await response.text()}`);
   }
 
   const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned no text");
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error("OpenAI returned no text");
 
   return text.trim().replace(/^["']|["']$/g, "").slice(0, MAX_DESCRIPTION_CHARS);
 }
 
 async function main() {
+  const missing = ["FIREBASE_SERVICE_ACCOUNT", "OPENAI_API_KEY"].filter(
+    (name) => !process.env[name]
+  );
+  if (missing.length) {
+    console.log(`Secrets not configured (${missing.join(", ")}), skipping.`);
+    return;
+  }
+
   const db = initFirestore();
   const snapshot = await db.collectionGroup("urls").get();
   const pending = snapshot.docs.filter((doc) => !doc.data().description);
