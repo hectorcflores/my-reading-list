@@ -330,6 +330,66 @@
       color: var(--ink-2);
     }
 
+    .auth-alt {
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .auth-alt:hover {
+      color: var(--ink-2);
+    }
+
+    .password-form {
+      display: grid;
+      gap: 8px;
+      width: min(320px, 100%);
+      justify-self: center;
+      margin: 0 auto;
+    }
+
+    .password-form.set-password {
+      margin-top: 10px;
+    }
+
+    .auth-input {
+      min-height: 44px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--chip);
+      color: var(--ink);
+      font: inherit;
+      font-size: 14px;
+    }
+
+    .auth-input:focus {
+      outline: none;
+      border-color: var(--ink-2);
+    }
+
+    .hint-line {
+      min-height: 18px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .hint-line[data-tone="issue"] {
+      color: var(--issue);
+    }
+
+    .hint-line[data-tone="ok"] {
+      color: var(--ok);
+    }
+
     [hidden] {
       display: none !important;
     }
@@ -364,6 +424,11 @@
 
     <section class="auth-view" id="authView">
       <p id="authMessage">One list, on every device.</p>
+      <div class="password-form" id="passwordForm" hidden>
+        <input class="auth-input" id="passwordEmail" type="email" autocomplete="username" placeholder="you@gmail.com">
+        <input class="auth-input" id="passwordInput" type="password" autocomplete="current-password" placeholder="password">
+        <button class="google-button" id="passwordSignInButton" type="button">Sign in</button>
+      </div>
       <button class="google-button" id="signInButton" type="button" hidden>
         <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
           <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
@@ -373,6 +438,7 @@
         </svg>
         Sign in with Google
       </button>
+      <button class="auth-alt" id="passwordToggle" type="button" hidden>Use a password instead (restricted computers)</button>
     </section>
 
     <section class="composer" id="composerView" aria-label="Save URLs" hidden>
@@ -396,8 +462,15 @@
     <p class="account-row" id="accountRow" hidden>
       <span id="accountEmail"></span>
       <span>·</span>
+      <button id="setPasswordToggle" type="button">Set password</button>
+      <span>·</span>
       <button id="signOutButton" type="button">Sign out</button>
     </p>
+    <div class="password-form set-password" id="setPasswordForm" hidden>
+      <input class="auth-input" id="setPasswordInput" type="password" autocomplete="new-password" placeholder="new password (6+ characters)">
+      <button class="google-button" id="setPasswordButton" type="button">Save</button>
+      <p class="hint-line" id="setPasswordHint"></p>
+    </div>
   </main>
 
   <script>
@@ -413,6 +486,16 @@
         authView: document.querySelector("#authView"),
         authMessage: document.querySelector("#authMessage"),
         signInButton: document.querySelector("#signInButton"),
+        passwordToggle: document.querySelector("#passwordToggle"),
+        passwordForm: document.querySelector("#passwordForm"),
+        passwordEmail: document.querySelector("#passwordEmail"),
+        passwordInput: document.querySelector("#passwordInput"),
+        passwordSignInButton: document.querySelector("#passwordSignInButton"),
+        setPasswordToggle: document.querySelector("#setPasswordToggle"),
+        setPasswordForm: document.querySelector("#setPasswordForm"),
+        setPasswordInput: document.querySelector("#setPasswordInput"),
+        setPasswordButton: document.querySelector("#setPasswordButton"),
+        setPasswordHint: document.querySelector("#setPasswordHint"),
         composerView: document.querySelector("#composerView"),
         listView: document.querySelector("#listView"),
         urlInput: document.querySelector("#urlInput"),
@@ -472,9 +555,12 @@
         els.authView.hidden = false;
         els.authMessage.textContent = message || "One list, on every device.";
         els.signInButton.hidden = false;
+        els.passwordToggle.hidden = false;
+        els.passwordForm.hidden = true;
         els.composerView.hidden = true;
         els.listView.hidden = true;
         els.accountRow.hidden = true;
+        els.setPasswordForm.hidden = true;
         setSyncStatus("Signed out", "local");
       }
 
@@ -482,9 +568,12 @@
         els.authView.hidden = false;
         els.authMessage.textContent = message;
         els.signInButton.hidden = true;
+        els.passwordToggle.hidden = true;
+        els.passwordForm.hidden = true;
         els.composerView.hidden = true;
         els.listView.hidden = true;
         els.accountRow.hidden = true;
+        els.setPasswordForm.hidden = true;
         setSyncStatus("Offline", "issue");
       }
 
@@ -493,6 +582,8 @@
         els.composerView.hidden = false;
         els.listView.hidden = false;
         els.accountRow.hidden = false;
+        els.setPasswordForm.hidden = true;
+        els.setPasswordHint.textContent = "";
         els.accountEmail.textContent = user.email
           ? `Signed in as ${user.email}`
           : "Signed in";
@@ -687,6 +778,73 @@
       });
       els.signOutButton.addEventListener("click", () => services.signOutUser());
 
+      // Password side door: sign-in without Google's account picker, for
+      // managed computers that pin the browser to a work account. The
+      // password is set below while signed in with Google, so both methods
+      // land on the same account and the same data.
+      els.passwordToggle.addEventListener("click", () => {
+        els.passwordForm.hidden = !els.passwordForm.hidden;
+        if (!els.passwordForm.hidden) els.passwordEmail.focus();
+      });
+
+      async function passwordSignIn() {
+        const email = els.passwordEmail.value.trim();
+        const password = els.passwordInput.value;
+        if (!email || !password) return;
+        try {
+          await services.signInWithPassword(email, password);
+          els.passwordInput.value = "";
+        } catch (error) {
+          console.warn(error);
+          showSignedOut("That email + password didn't work. Set the password from a signed-in device first.");
+          els.passwordForm.hidden = false;
+        }
+      }
+
+      els.passwordSignInButton.addEventListener("click", passwordSignIn);
+      els.passwordInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") passwordSignIn();
+      });
+
+      els.setPasswordToggle.addEventListener("click", () => {
+        els.setPasswordForm.hidden = !els.setPasswordForm.hidden;
+        if (!els.setPasswordForm.hidden) els.setPasswordInput.focus();
+      });
+
+      function setPasswordHint(text, tone = "") {
+        els.setPasswordHint.textContent = text;
+        if (tone) {
+          els.setPasswordHint.dataset.tone = tone;
+        } else {
+          delete els.setPasswordHint.dataset.tone;
+        }
+      }
+
+      els.setPasswordButton.addEventListener("click", async () => {
+        const password = els.setPasswordInput.value;
+        if (!user) return;
+        if (!user.email) {
+          setPasswordHint("This account has no email address to attach a password to.", "issue");
+          return;
+        }
+        if (password.length < 6) {
+          setPasswordHint("Use at least 6 characters.", "issue");
+          return;
+        }
+        try {
+          await services.setPassword(user.email, password);
+          els.setPasswordInput.value = "";
+          setPasswordHint(`Password set. On restricted computers, sign in with ${user.email} + this password.`, "ok");
+        } catch (error) {
+          console.warn(error);
+          if (error && error.code === "auth/requires-recent-login") {
+            setPasswordHint("For safety, sign out, sign back in, and set the password right away.", "issue");
+          } else {
+            setPasswordHint("Couldn't set the password. Try again.", "issue");
+          }
+        }
+      });
+
       window.addEventListener("focus", () => {
         loadRemoteUrls();
       });
@@ -779,6 +937,22 @@
             }
           },
           signOutUser: () => authMod.signOut(auth),
+          signInWithPassword: (email, password) =>
+            authMod.signInWithEmailAndPassword(auth, email, password),
+          // Attach (or replace) a password on the CURRENT account, so both
+          // sign-in methods resolve to the same uid and the same data.
+          async setPassword(email, password) {
+            const credential = authMod.EmailAuthProvider.credential(email, password);
+            try {
+              await authMod.linkWithCredential(auth.currentUser, credential);
+            } catch (error) {
+              if (error && error.code === "auth/provider-already-linked") {
+                await authMod.updatePassword(auth.currentUser, password);
+              } else {
+                throw error;
+              }
+            }
+          },
           listUrls: (uid) => listTenantUrls(uid),
           listLegacyUrls: (hash) => listTenantUrls(hash),
           async createUrl(uid, { id, url, description, createdAt }) {
